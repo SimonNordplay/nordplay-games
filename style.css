@@ -52,7 +52,14 @@ header { position:sticky; top:0; z-index:10; background:var(--bl); color:var(--w
 
 /* ---- grid ---- */
 main { max-width:var(--maxw); margin:0 auto; padding:26px 20px 60px; }
-.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(168px, 1fr)); gap:18px; }
+.grid { display:block; }
+.band { display:grid; gap:18px; margin-bottom:18px; }
+.band.sq { grid-template-columns:repeat(auto-fill, minmax(168px, 1fr)); }
+.band.ls { grid-template-columns:repeat(auto-fill, minmax(262px, 1fr)); }
+.band.pt { grid-template-columns:repeat(auto-fill, minmax(152px, 1fr)); }
+.thumb.sq { aspect-ratio:1; }
+.thumb.ls { aspect-ratio:1200/750; }
+.thumb.pt { aspect-ratio:1000/1350; }
 .gcard { cursor:pointer; }
 .thumb { position:relative; aspect-ratio:1; background:var(--g1); border-radius:var(--r);
          overflow:hidden; }

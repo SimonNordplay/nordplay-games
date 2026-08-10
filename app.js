@@ -103,7 +103,7 @@
     if (chip === 'kommande') filtered.sort((a, b) => String(a.rd).localeCompare(String(b.rd)));
     else if (chip === 'tunn') filtered.sort((a, b) => wordCount(a) - wordCount(b));
     else filtered.sort((a, b) => (art(b) - art(a)) || String(b.rd || '').localeCompare(String(a.rd || '')));
-    cursor = 0;
+    cursor = 0; bandIx = 0;
     $('#grid').innerHTML = '';
     $('#empty').hidden = filtered.length > 0;
     const tw = filtered.reduce((s, g) => s + wordCount(g), 0);
@@ -112,9 +112,19 @@
     more();
   }
 
-  function cardHTML(g) {
-    const img = g.th && g.th.sq
-      ? `<img loading="lazy" src="${esc(g.th.sq)}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">
+  function pickImg(g, fmt) {
+    // slumpa en version som har det formatet; fallback: valfri version/storlek (cover-crop fixar)
+    const vs = Object.values(g.vers || {});
+    const withFmt = vs.filter(v => v[fmt]);
+    if (withFmt.length) return withFmt[Math.floor(Math.random() * withFmt.length)][fmt];
+    for (const v of vs) { const any = v.sq || v.ls || v.pt; if (any) return any; }
+    return g.th ? (g.th[fmt] || g.th.sq || g.th.ls || g.th.pt) : null;
+  }
+
+  function cardHTML(g, fmt) {
+    const src = pickImg(g, fmt || 'sq');
+    const img = src
+      ? `<img loading="lazy" src="${esc(src)}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">
          <div class="ph" style="display:none">${esc(g.t)}</div>`
       : `<div class="ph">${esc(g.t)}</div>`;
     const badges = [];
@@ -122,15 +132,23 @@
     else if (isNew(g)) badges.push('<span class="b">NY</span>');
     if (g.jp) badges.push('<span class="b">JACKPOT</span>');
     return `<a class="gcard" href="#/game/${encodeURIComponent(g.id)}" style="text-decoration:none;color:inherit">
-      <div class="thumb">${img}<div class="badges">${badges.join('')}</div></div>
+      <div class="thumb ${fmt || 'sq'}">${img}<div class="badges">${badges.join('')}</div></div>
       <div class="meta"><b>${esc(g.t)}</b><div class="prov">${esc(g.p || '')}</div></div></a>`;
   }
 
+  // band-cykel: kvadrat 6 · landscape 4 · porträtt 5 — blandade rader som en riktig lobby
+  const BANDS = [['sq', 6], ['ls', 4], ['pt', 5], ['sq', 6], ['pt', 5], ['ls', 4]];
+  let bandIx = 0;
   function more() {
     if (cursor >= filtered.length) return;
-    const frag = filtered.slice(cursor, cursor + CHUNK).map(cardHTML).join('');
-    $('#grid').insertAdjacentHTML('beforeend', frag);
-    cursor += CHUNK;
+    let html = '';
+    for (let n = 0; n < 5 && cursor < filtered.length; n++) {
+      const [fmt, cnt] = BANDS[bandIx % BANDS.length]; bandIx++;
+      const games = filtered.slice(cursor, cursor + cnt);
+      cursor += games.length;
+      html += `<div class="band ${fmt}">${games.map(g => cardHTML(g, fmt)).join('')}</div>`;
+    }
+    $('#grid').insertAdjacentHTML('beforeend', html);
   }
 
   function boot() {
@@ -224,9 +242,9 @@
       ${specs.length ? `<section class="dsec"><h2>Specifikationer</h2><table class="specs">${specs.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${fmt(v)}</td></tr>`).join('')}</table></section>` : ''}
       ${themes.length ? `<section class="dsec"><h2>Teman</h2><div class="ftags">${themes.map(t => `<span>${esc(t)}</span>`).join('')}</div></section>` : ''}
       ${g.desc ? `<section class="dsec"><h2>Vår ad-copy</h2><div class="adcopy"><span class="lbl">Games.description</span>${esc(g.desc)}</div></section>` : ''}
-      ${vkeys.length ? `<section class="dsec"><h2>Thumbnails · ${esc(dver || '')}</h2><div class="variants" id="dvariants">
-        ${['sq', 'ls', 'pt'].filter(k => vset[k]).map(k => `<figure><img loading="lazy" src="${esc(vset[k])}"><figcaption>${{ sq: '1200×1200', ls: '1200×750', pt: '1000×1350' }[k]}</figcaption></figure>`).join('')}
-      </div></section>` : ''}
+      ${vkeys.length ? vkeys.map(vk => `<section class="dsec"><h2>Thumbnails · ${esc(vk)}</h2><div class="variants">
+        ${['sq', 'ls', 'pt'].filter(k => g.vers[vk][k]).map(k => `<figure><img loading="lazy" src="${esc(g.vers[vk][k])}"><figcaption>${{ sq: '1200×1200', ls: '1200×750', pt: '1000×1350' }[k]}</figcaption></figure>`).join('')}
+      </div></section>`).join('') : ''}
       <div class="dmeta">slug: ${esc(g.id)}${c.src ? ' · copy-källa: ' + esc(c.src) : ''}</div>
     </div>`;
   }
