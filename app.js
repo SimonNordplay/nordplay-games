@@ -60,6 +60,13 @@
   const isSoon = g => g.rd && g.rd > today;
   const hasBB = g => g.attrs && String(g.attrs.bonus_buy || '').match(/^(1|true|yes|ja)/i);
   const richCopy = g => g.copy && (g.copy.long || (g.copy.features || []).length);
+  const wordCount = g => {
+    const c = g.copy || {};
+    let t = [c.tag, c.long || c.med || c.short].filter(Boolean).join(' ');
+    (Array.isArray(c.features) ? c.features : []).forEach(f => { t += ' ' + (f.name || '') + ' ' + (f.description || f.text || f.desc || ''); });
+    (Array.isArray(c.usp) ? c.usp : []).forEach(u => { t += ' ' + (typeof u === 'string' ? u : (u.text || '')); });
+    return t.trim() ? t.trim().split(/\s+/).length : 0;
+  };
 
   const CHIPS = [
     ['alla',     'Alla spel',    () => true],
@@ -70,6 +77,7 @@
     ['live',     '🎥 Live',      g => g.gt === 'live_casino' || g.live],
     ['copy',     '📝 Rik copy',  richCopy],
     ['bild',     '🖼 Med bild',  g => g.th && g.th.sq],
+    ['tunn',     '⚠️ Tunn copy', g => wordCount(g) < 60],
   ];
 
   function renderChips() {
@@ -93,11 +101,13 @@
       && (!qq || (g.t + ' ' + (g.p || '') + ' ' + (g.theme || '') + ' ' + (g.themes || []).join(' ')).toLowerCase().includes(qq)));
     const art = g => !!(g.th && g.th.sq);
     if (chip === 'kommande') filtered.sort((a, b) => String(a.rd).localeCompare(String(b.rd)));
+    else if (chip === 'tunn') filtered.sort((a, b) => wordCount(a) - wordCount(b));
     else filtered.sort((a, b) => (art(b) - art(a)) || String(b.rd || '').localeCompare(String(a.rd || '')));
     cursor = 0;
     $('#grid').innerHTML = '';
     $('#empty').hidden = filtered.length > 0;
-    $('#count').textContent = filtered.length + ' spel';
+    const tw = filtered.reduce((s, g) => s + wordCount(g), 0);
+    $('#count').textContent = filtered.length + ' spel · ' + tw.toLocaleString('sv-SE') + ' ord copy';
     renderChips();
     more();
   }
@@ -173,9 +183,14 @@
     return '';
   }
 
+  let dver = null; // aktiv thumbnail-version i detaljvyn
   function detailHTML(g) {
     const c = g.copy || {};
-    const hero = g.th && (g.th.ls || g.th.sq);
+    const vkeys = Object.keys(g.vers || {});
+    if (!dver || !vkeys.includes(dver)) dver = vkeys[vkeys.length - 1] || null;
+    const vset = dver ? g.vers[dver] : (g.th || {});
+    const hero = vset.ls || vset.sq || vset.pt;
+    const wc = wordCount(g);
     const specs = specRows(g);
     const featC = featureCards(g);
     const featT = (g.feat || []).length ? `<div class="ftags">${g.feat.map(f => `<span>${esc(f)}</span>`).join('')}</div>` : '';
@@ -186,7 +201,8 @@
       <div class="dbar"><button class="back" onclick="history.back()">← Tillbaka</button>
         <span class="bc">${esc(g.p || '')} / ${esc(g.t)}</span></div>
       <div class="dhero">
-        <div class="art">${hero ? `<img src="${esc(hero)}" onerror="this.outerHTML='<div class=noart>${esc(g.t)}</div>'">` : `<div class="noart">${esc(g.t)}</div>`}</div>
+        <div class="art">${hero ? `<img id="dheroimg" src="${esc(hero)}" onerror="this.outerHTML='<div class=noart>${esc(g.t)}</div>'">` : `<div class="noart">${esc(g.t)}</div>`}
+          ${vkeys.length > 1 ? `<div class="vtoggle">${vkeys.map(k => `<button class="vbtn${k === dver ? ' on' : ''}" data-v="${esc(k)}">${esc(k)}</button>`).join('')}</div>` : ''}</div>
         <div class="dtitle">
           <h1>${esc(g.t)}</h1>
           <div class="dprov">${esc(g.p || 'Okänd provider')}${g.rd ? ' · ' + esc(g.rd) : ''}</div>
@@ -196,6 +212,7 @@
             ${hasBB(g) ? '<span class="b">BONUSKÖP</span>' : ''}
             ${(g.gt === 'live_casino') ? '<span class="b">LIVE CASINO</span>' : ''}
             ${(g.br || []).map(b => `<span class="b ol">${esc(b)}</span>`).join('')}
+            <span class="b wc${wc < 60 ? ' thin' : ''}">${wc} ORD COPY</span>
           </div>
         </div>
       </div>
@@ -207,8 +224,8 @@
       ${specs.length ? `<section class="dsec"><h2>Specifikationer</h2><table class="specs">${specs.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${fmt(v)}</td></tr>`).join('')}</table></section>` : ''}
       ${themes.length ? `<section class="dsec"><h2>Teman</h2><div class="ftags">${themes.map(t => `<span>${esc(t)}</span>`).join('')}</div></section>` : ''}
       ${g.desc ? `<section class="dsec"><h2>Vår ad-copy</h2><div class="adcopy"><span class="lbl">Games.description</span>${esc(g.desc)}</div></section>` : ''}
-      ${g.th && (g.th.sq || g.th.ls || g.th.pt) ? `<section class="dsec"><h2>Thumbnails</h2><div class="variants">
-        ${['sq', 'ls', 'pt'].filter(k => g.th[k]).map(k => `<figure><img loading="lazy" src="${esc(g.th[k])}"><figcaption>${{ sq: '1200×1200', ls: '1200×750', pt: '1000×1350' }[k]}</figcaption></figure>`).join('')}
+      ${vkeys.length ? `<section class="dsec"><h2>Thumbnails · ${esc(dver || '')}</h2><div class="variants" id="dvariants">
+        ${['sq', 'ls', 'pt'].filter(k => vset[k]).map(k => `<figure><img loading="lazy" src="${esc(vset[k])}"><figcaption>${{ sq: '1200×1200', ls: '1200×750', pt: '1000×1350' }[k]}</figcaption></figure>`).join('')}
       </div></section>` : ''}
       <div class="dmeta">slug: ${esc(g.id)}${c.src ? ' · copy-källa: ' + esc(c.src) : ''}</div>
     </div>`;
@@ -219,7 +236,14 @@
     const d = $('#detail');
     if (m && GAMES.length) {
       const g = GAMES.find(x => x.id === decodeURIComponent(m[1]));
-      if (g) { d.innerHTML = detailHTML(g); d.hidden = false; d.scrollTop = 0; document.body.style.overflow = 'hidden'; return; }
+      if (g) {
+        d.innerHTML = detailHTML(g); d.hidden = false; d.scrollTop = 0; document.body.style.overflow = 'hidden';
+        d.querySelectorAll('.vbtn').forEach(b => b.addEventListener('click', () => {
+          dver = b.dataset.v; const st = d.scrollTop; d.innerHTML = detailHTML(g); d.scrollTop = st;
+          d.querySelectorAll('.vbtn').forEach(x => x.addEventListener('click', ev => { dver = ev.target.dataset.v; route(); }));
+        }));
+        return;
+      }
     }
     d.hidden = true; d.innerHTML = ''; document.body.style.overflow = '';
   }
