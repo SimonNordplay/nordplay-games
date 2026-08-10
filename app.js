@@ -18,7 +18,7 @@
 
   /* ---------- krypto ---------- */
   async function unlock(pw) {
-    const buf = await (await fetch('data.enc', { cache: 'force-cache' })).arrayBuffer();
+    const buf = await (await fetch('data.enc', { cache: 'no-cache' })).arrayBuffer();
     const b = new Uint8Array(buf);
     const salt = b.slice(0, 16), iv = b.slice(16, 28), ct = b.slice(28);
     const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
