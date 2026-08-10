@@ -25,22 +25,34 @@
 
 <!-- APP -->
 <div id="app" hidden>
-  <header>
-    <div class="hwrap">
-      <a class="wordmark sm" href="#/"><svg class="mark" viewBox="0 0 1502.17 718.23" fill="currentColor" aria-hidden="true"><path d="M949.02,0l-66.13,38.18v638.72l66.13,38.18,553.15-319.36v-76.36L949.02,0h0Z"/><path d="M434.55,34.45h-76.36L0,654.85l53.52,63.37,342.85-127.25,342.85,127.25,53.52-63.37L434.55,34.45h0Z"/></svg> NORDPLAY <b class="mint">GAMES</b></a>
+  <aside id="side">
+    <a class="wordmark sm" href="#/"><svg class="mark" viewBox="0 0 1502.17 718.23" fill="currentColor" aria-hidden="true"><path d="M949.02,0l-66.13,38.18v638.72l66.13,38.18,553.15-319.36v-76.36L949.02,0h0Z"/><path d="M434.55,34.45h-76.36L0,654.85l53.52,63.37,342.85-127.25,342.85,127.25,53.52-63.37L434.55,34.45h0Z"/></svg> NORDPLAY <b class="mint">GAMES</b></a>
+    <nav id="menu"></nav>
+    <div class="side-h">PROVIDERS</div>
+    <nav id="provmenu"></nav>
+    <div class="side-foot">Nordplay Group · internt</div>
+  </aside>
+  <div id="scrim"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <button id="burger" aria-label="Meny">☰</button>
       <div class="hsearch"><input id="q" type="search" placeholder="Sök spel, provider, tema…"></div>
       <div class="hcount" id="count"></div>
     </div>
-    <nav class="chips" id="chips"></nav>
-  </header>
 
-  <main>
-    <div id="grid" class="grid"></div>
-    <div id="sentinel"></div>
-    <div id="empty" class="empty" hidden>Inga spel matchar.</div>
-  </main>
+    <main id="content">
+      <div id="home"></div>
+      <div id="gridview" hidden>
+        <div class="gv-head"><h2 id="gv-title"></h2><span id="gv-count"></span></div>
+        <div id="grid" class="grid"></div>
+        <div id="sentinel"></div>
+        <div id="empty" class="empty" hidden>Inga spel matchar.</div>
+      </div>
+    </main>
 
-  <footer><b>Nordplay Group</b> · Nordplay Games · intern katalog · <span id="fcount"></span> spel</footer>
+    <footer><b>Nordplay Group</b> · Nordplay Games · intern katalog · <span id="fcount"></span> spel</footer>
+  </div>
 </div>
 
 <!-- DETALJ -->

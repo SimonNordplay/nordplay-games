@@ -1,20 +1,14 @@
-/* Nordplay Games — dold intern katalog.
-   Data ligger AES-256-GCM-krypterad i data.enc (PBKDF2-SHA256 200k).
-   Utan rätt lösenord finns ingen läsbar data i repot. */
+/* Nordplay Games — dold intern katalog (Stake-stil: sidomeny + scrolliga rader).
+   Data ligger AES-256-GCM-krypterad i data.enc (PBKDF2-SHA256 200k). */
 (function () {
   'use strict';
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, m =>
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
 
-  let GAMES = [];
-  let filtered = [];
-  let chip = 'alla';
-  let prov = '';
+  let GAMES = [], filtered = [], cursor = 0, bandIx = 0, io = null;
+  let view = { kind: 'hem' };   // {kind:'hem'} | {kind:'cat',key} | {kind:'prov',name}
   let q = '';
-  let cursor = 0;
-  const CHUNK = 60;
-  let io = null;
 
   /* ---------- krypto ---------- */
   async function unlock(pw) {
@@ -22,44 +16,33 @@
     const b = new Uint8Array(buf);
     const salt = b.slice(0, 16), iv = b.slice(16, 28), ct = b.slice(28);
     const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
-    const key = await crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: 200000, hash: 'SHA-256' },
+    const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 200000, hash: 'SHA-256' },
       km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
-    const gz = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct); // kastar vid fel pw
-    const ds = new DecompressionStream('gzip');
-    const json = await new Response(new Response(gz).body.pipeThrough(ds)).text();
+    const gz = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    const json = await new Response(new Response(gz).body.pipeThrough(new DecompressionStream('gzip'))).text();
     return JSON.parse(json);
   }
-
   $('#lockForm').addEventListener('submit', async e => {
     e.preventDefault();
-    const pw = $('#pw').value.trim();
-    if (!pw) return;
-    $('#lockMsg').textContent = 'Dekrypterar…';
-    $('#lockMsg').style.color = '#999';
-    try {
-      GAMES = await unlock(pw);
-      sessionStorage.setItem('npg', pw);
-      boot();
-    } catch (_) {
-      $('#lockMsg').style.color = '#f66';
-      $('#lockMsg').textContent = 'Fel lösenord.';
-      $('#pw').select();
-    }
+    const pw = $('#pw').value.trim(); if (!pw) return;
+    $('#lockMsg').textContent = 'Dekrypterar…'; $('#lockMsg').style.color = '#999';
+    try { GAMES = await unlock(pw); sessionStorage.setItem('npg', pw); boot(); }
+    catch (_) { $('#lockMsg').style.color = '#f66'; $('#lockMsg').textContent = 'Fel lösenord.'; $('#pw').select(); }
   });
-
-  (async function autoUnlock() {
-    const pw = sessionStorage.getItem('npg');
-    if (!pw) return;
+  (async () => {
+    const pw = sessionStorage.getItem('npg'); if (!pw) return;
     try { GAMES = await unlock(pw); boot(); } catch (_) { sessionStorage.removeItem('npg'); }
   })();
 
-  /* ---------- lobby ---------- */
+  /* ---------- predikat ---------- */
   const today = new Date().toISOString().slice(0, 10);
   const isNew = g => g.rd && g.rd <= today && g.rd >= new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
   const isSoon = g => g.rd && g.rd > today;
   const hasBB = g => g.attrs && String(g.attrs.bonus_buy || '').match(/^(1|true|yes|ja)/i);
+  const isLiveC = g => g.gt === 'live_casino';
+  const isClassic = g => g.rd && g.rd < '2021-01-01' && !isLiveC(g);
   const richCopy = g => g.copy && (g.copy.long || (g.copy.features || []).length);
+  const hasArt = g => !!(g.th && (g.th.sq || g.th.ls || g.th.pt));
   const wordCount = g => {
     const c = g.copy || {};
     let t = [c.tag, c.long || c.med || c.short].filter(Boolean).join(' ');
@@ -67,62 +50,41 @@
     (Array.isArray(c.usp) ? c.usp : []).forEach(u => { t += ' ' + (typeof u === 'string' ? u : (u.text || '')); });
     return t.trim() ? t.trim().split(/\s+/).length : 0;
   };
+  const artFirst = (a, b) => (hasArt(b) - hasArt(a)) || String(b.rd || '').localeCompare(String(a.rd || ''));
 
-  const CHIPS = [
-    ['alla',     'Alla spel',    () => true],
-    ['nyheter',  '✨ Nyheter',   isNew],
-    ['kommande', '🔜 Kommande',  isSoon],
-    ['bonuskop', '💰 Bonusköp',  hasBB],
-    ['jackpot',  '🎰 Jackpott',  g => g.jp],
-    ['live',     '🎥 Live',      g => g.gt === 'live_casino' || g.live],
-    ['copy',     '📝 Rik copy',  richCopy],
-    ['bild',     '🖼 Med bild',  g => g.th && g.th.sq],
-    ['tunn',     '⚠️ Tunn copy', g => wordCount(g) < 60],
-  ];
+  const CATS = {
+    nya:       ['✨ Nya släpp',   isNew, artFirst],
+    kommande:  ['🔜 Kommande',    isSoon, (a, b) => String(a.rd).localeCompare(String(b.rd))],
+    bonuskop:  ['💰 Bonusköp',    g => hasBB(g) && !isSoon(g), artFirst],
+    jackpot:   ['🎰 Jackpott',    g => g.jp, artFirst],
+    live:      ['🎥 Live Casino', isLiveC, artFirst],
+    klassiker: ['🕹 Klassiker',   isClassic, artFirst],
+    copy:      ['📝 Rik copy',    richCopy, artFirst],
+    tunn:      ['⚠️ Tunn copy',   g => wordCount(g) < 60, (a, b) => wordCount(a) - wordCount(b)],
+    alla:      ['🎮 Alla spel',   () => true, artFirst],
+  };
+  const MENU = [['hem', '🏠 Lobby'], ...Object.entries(CATS).map(([k, v]) => [k, v[0]])];
 
-  function renderChips() {
-    const provs = [...new Set(GAMES.map(g => g.p).filter(Boolean))].sort();
-    $('#chips').innerHTML = CHIPS.map(([k, label]) =>
-      `<button class="chip${k === chip ? ' on' : ''}" data-chip="${k}">${label}</button>`).join('') +
-      `<label class="chip${prov ? ' on' : ''}"><select id="provSel">
-        <option value="">Provider: alla</option>
-        ${provs.map(p => `<option${p === prov ? ' selected' : ''}>${esc(p)}</option>`).join('')}
-      </select></label>`;
-    $('#chips').querySelectorAll('[data-chip]').forEach(b =>
-      b.addEventListener('click', () => { chip = b.dataset.chip; applyFilter(); }));
-    $('#provSel').addEventListener('change', e => { prov = e.target.value; applyFilter(); });
-  }
-
-  function applyFilter() {
-    const pred = CHIPS.find(c => c[0] === chip)[2];
-    const qq = q.toLowerCase();
-    filtered = GAMES.filter(g => pred(g)
-      && (!prov || g.p === prov)
-      && (!qq || (g.t + ' ' + (g.p || '') + ' ' + (g.theme || '') + ' ' + (g.themes || []).join(' ')).toLowerCase().includes(qq)));
-    const art = g => !!(g.th && g.th.sq);
-    if (chip === 'kommande') filtered.sort((a, b) => String(a.rd).localeCompare(String(b.rd)));
-    else if (chip === 'tunn') filtered.sort((a, b) => wordCount(a) - wordCount(b));
-    else filtered.sort((a, b) => (art(b) - art(a)) || String(b.rd || '').localeCompare(String(a.rd || '')));
-    cursor = 0; bandIx = 0;
-    $('#grid').innerHTML = '';
-    $('#empty').hidden = filtered.length > 0;
-    const tw = filtered.reduce((s, g) => s + wordCount(g), 0);
-    $('#count').textContent = filtered.length + ' spel · ' + tw.toLocaleString('sv-SE') + ' ord copy';
-    renderChips();
-    more();
-  }
-
+  /* ---------- kort ---------- */
+  const SZL = { sq: '1200×1200', ls: '1200×750', pt: '1000×1350' };
   function pickImg(g, fmt) {
-    // slumpa en version som har det formatet; fallback: valfri version/storlek (cover-crop fixar)
     const vs = Object.values(g.vers || {});
     const withFmt = vs.filter(v => v[fmt]);
     if (withFmt.length) return withFmt[Math.floor(Math.random() * withFmt.length)][fmt];
     for (const v of vs) { const any = v.sq || v.ls || v.pt; if (any) return any; }
     return g.th ? (g.th[fmt] || g.th.sq || g.th.ls || g.th.pt) : null;
   }
-
+  function infoLine(g) {
+    const a = g.attrs || {};
+    const bits = [];
+    if (a.rtp) bits.push('RTP ' + String(a.rtp).replace('%', '') + '%');
+    if (a.max_win_x) bits.push(parseInt(String(a.max_win_x).replace(/[^0-9]/g, '') || '0').toLocaleString('sv-SE') + 'x');
+    else if (a.volatility) bits.push(String(a.volatility));
+    return bits.slice(0, 2).join(' · ');
+  }
   function cardHTML(g, fmt) {
-    const src = pickImg(g, fmt || 'sq');
+    fmt = fmt || 'sq';
+    const src = pickImg(g, fmt);
     const img = src
       ? `<img loading="lazy" src="${esc(src)}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">
          <div class="ph" style="display:none">${esc(g.t)}</div>`
@@ -131,16 +93,86 @@
     if (isSoon(g)) badges.push('<span class="b soon">SNART</span>');
     else if (isNew(g)) badges.push('<span class="b">NY</span>');
     if (g.jp) badges.push('<span class="b">JACKPOT</span>');
-    return `<a class="gcard" href="#/game/${encodeURIComponent(g.id)}" style="text-decoration:none;color:inherit">
-      <div class="thumb ${fmt || 'sq'}">${img}<div class="badges">${badges.join('')}</div></div>
-      <div class="meta"><b>${esc(g.t)}</b><div class="prov">${esc(g.p || '')}</div></div></a>`;
+    const info = infoLine(g);
+    return `<a class="gcard" href="#/game/${encodeURIComponent(g.id)}">
+      <div class="thumb ${fmt}">${img}<div class="badges">${badges.join('')}</div></div>
+      <div class="meta"><b>${esc(g.t)}</b><div class="prov">${esc(g.p || '')}${info ? ' <span class="inf">· ' + esc(info) + '</span>' : ''}</div></div></a>`;
   }
 
-  // band-cykel: kvadrat 6 · landscape 4 · porträtt 5 — blandade rader som en riktig lobby
+  /* ---------- HEM: hero + scrolliga rader ---------- */
+  function topProviders(n) {
+    const c = {};
+    GAMES.forEach(g => { if (g.p) c[g.p] = (c[g.p] || 0) + 1; });
+    return Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, n);
+  }
+  function rowsConfig() {
+    const provRows = topProviders(6).map(([p], i) =>
+      ({ label: p, pred: g => g.p === p, fmt: ['sq', 'pt', 'ls'][i % 3], href: '#/p/' + encodeURIComponent(p) }));
+    return [
+      { label: '✨ Nya släpp',   pred: CATS.nya[1],       fmt: 'sq', href: '#/c/nya' },
+      { label: '🔥 Populära',    pred: g => (g.br || []).length >= 4 && !isSoon(g), fmt: 'pt', href: '#/c/alla' },
+      { label: '💰 Bonusköp',    pred: CATS.bonuskop[1],  fmt: 'sq', href: '#/c/bonuskop' },
+      { label: '🎰 Jackpott',    pred: CATS.jackpot[1],   fmt: 'ls', href: '#/c/jackpot' },
+      { label: '🎥 Live Casino', pred: CATS.live[1],      fmt: 'sq', href: '#/c/live' },
+      { label: '🔜 Kommande',    pred: CATS.kommande[1],  fmt: 'ls', href: '#/c/kommande' },
+      { label: '🕹 Klassiker',   pred: CATS.klassiker[1], fmt: 'pt', href: '#/c/klassiker' },
+      ...provRows,
+    ];
+  }
+  function rowHTML(r, ix) {
+    let games = GAMES.filter(g => r.pred(g) && hasArt(g)).sort(artFirst).slice(0, 34);
+    if (games.length < 6) games = GAMES.filter(r.pred).sort(artFirst).slice(0, 34);
+    if (!games.length) return '';
+    return `<section class="row">
+      <div class="row-head">
+        <h3>${r.label}</h3>
+        <div class="row-tools">
+          <a class="row-all" href="${r.href}">Visa alla</a>
+          <button class="ra" data-dir="-1" data-row="${ix}">‹</button>
+          <button class="ra" data-dir="1" data-row="${ix}">›</button>
+        </div>
+      </div>
+      <div class="scroller" id="row${ix}">${games.map(g => cardHTML(g, r.fmt)).join('')}</div>
+    </section>`;
+  }
+  function renderHome() {
+    const rows = rowsConfig();
+    $('#home').innerHTML = `
+      <div class="hero">
+        <picture>
+          <source media="(max-width:700px)" srcset="assets/hero-sm.jpg">
+          <img src="assets/hero.jpg" alt="">
+        </picture>
+        <div class="hero-ov">
+          <h1>NORDPLAY <b>GAMES</b></h1>
+          <p>${GAMES.length.toLocaleString('sv-SE')} spel · hela katalogen med copy, specs & thumbnails</p>
+        </div>
+      </div>
+      ${rows.map((r, i) => rowHTML(r, i)).join('')}`;
+    $('#home').querySelectorAll('.ra').forEach(b => b.addEventListener('click', () => {
+      const sc = $('#row' + b.dataset.row);
+      sc.scrollBy({ left: (parseInt(b.dataset.dir)) * sc.clientWidth * 0.85, behavior: 'smooth' });
+    }));
+  }
+
+  /* ---------- GRID (kategori/provider/sök) ---------- */
   const BANDS = [['sq', 6], ['ls', 4], ['pt', 5], ['sq', 6], ['pt', 5], ['ls', 4]];
-  let bandIx = 0;
+  function applyGrid(title, pred, sort) {
+    const qq = q.toLowerCase();
+    filtered = GAMES.filter(g => pred(g)
+      && (!qq || (g.t + ' ' + (g.p || '') + ' ' + (g.theme || '') + ' ' + (g.themes || []).join(' ')).toLowerCase().includes(qq)));
+    filtered.sort(sort || artFirst);
+    cursor = 0; bandIx = 0;
+    $('#grid').innerHTML = '';
+    $('#gv-title').textContent = title;
+    $('#gv-count').textContent = filtered.length + ' spel';
+    $('#empty').hidden = filtered.length > 0;
+    const tw = filtered.reduce((s, g) => s + wordCount(g), 0);
+    $('#count').textContent = filtered.length + ' spel · ' + tw.toLocaleString('sv-SE') + ' ord copy';
+    more();
+  }
   function more() {
-    if (cursor >= filtered.length) return;
+    if (view.kind === 'hem' || cursor >= filtered.length) return;
     let html = '';
     for (let n = 0; n < 5 && cursor < filtered.length; n++) {
       const [fmt, cnt] = BANDS[bandIx % BANDS.length]; bandIx++;
@@ -151,27 +183,43 @@
     $('#grid').insertAdjacentHTML('beforeend', html);
   }
 
-  function boot() {
-    $('#lock').remove();
-    $('#app').hidden = false;
-    $('#fcount').textContent = GAMES.length;
-    $('#q').addEventListener('input', e => { q = e.target.value; applyFilter(); });
-    io = new IntersectionObserver(es => es[0].isIntersecting && more());
-    io.observe($('#sentinel'));
-    applyFilter();
-    route();
+  /* ---------- meny & vyer ---------- */
+  function renderMenu() {
+    $('#menu').innerHTML = MENU.map(([k, label]) =>
+      `<a class="mi${(view.kind === 'hem' && k === 'hem') || (view.kind === 'cat' && view.key === k) ? ' on' : ''}"
+          href="${k === 'hem' ? '#/' : '#/c/' + k}">${label}</a>`).join('');
+    $('#provmenu').innerHTML = topProviders(12).map(([p, n]) =>
+      `<a class="mi sm${view.kind === 'prov' && view.name === p ? ' on' : ''}" href="#/p/${encodeURIComponent(p)}">${esc(p)} <i>${n}</i></a>`).join('');
+    document.body.classList.remove('side-open');
+  }
+  function show(kind) {
+    $('#home').hidden = kind !== 'hem';
+    $('#gridview').hidden = kind === 'hem';
+  }
+  function applyView() {
+    renderMenu();
+    if (view.kind === 'hem') {
+      show('hem');
+      $('#count').textContent = GAMES.length.toLocaleString('sv-SE') + ' spel';
+      if (!$('#home').innerHTML) renderHome();
+    } else if (view.kind === 'cat') {
+      show('grid');
+      const c = CATS[view.key] || CATS.alla;
+      applyGrid(c[0].replace(/^[^\s]+\s/, ''), c[1], c[2]);
+    } else if (view.kind === 'prov') {
+      show('grid');
+      applyGrid(view.name, g => g.p === view.name);
+    }
+    window.scrollTo(0, 0);
   }
 
   /* ---------- detalj ---------- */
   const VOL = { 'very high': 'Mycket hög', high: 'Hög', 'medium-high': 'Medelhög', medium: 'Medel', 'low-medium': 'Låg till medel', low: 'Låg' };
-  const fmt = v => esc(String(v));
-
   function specRows(g) {
-    const a = g.attrs || {};
-    const rows = [];
-    if (a.rtp) rows.push(['RTP', a.rtp.toString().includes('%') ? a.rtp : a.rtp + ' %']);
+    const a = g.attrs || {}; const rows = [];
+    if (a.rtp) rows.push(['RTP', String(a.rtp).includes('%') ? a.rtp : a.rtp + ' %']);
     if (a.volatility) rows.push(['Volatilitet', VOL[String(a.volatility).toLowerCase()] || a.volatility]);
-    if (a.max_win_x || a.max_win) rows.push(['Max vinst', (a.max_win_x || a.max_win) + 'x']);
+    if (a.max_win_x || a.max_win) rows.push(['Max vinst', (a.max_win_x ? a.max_win_x + 'x' : a.max_win)]);
     if (a.hit_rate || a.hit_frequency) rows.push(['Träfffrekvens', a.hit_rate || a.hit_frequency]);
     if (a.reels) rows.push(['Hjul', a.reels + (a.rows ? ' × ' + a.rows : '')]);
     if (a.paylines) rows.push(['Vinstlinjer', a.paylines]);
@@ -182,26 +230,15 @@
     if (g.gt) rows.push(['Speltyp', g.gt.replace(/_/g, ' ')]);
     return rows;
   }
-
-  function paras(txt) {
-    return String(txt).split(/\n{2,}|\r\n\r\n/).map(p => p.trim()).filter(Boolean)
-      .map(p => `<p>${esc(p)}</p>`).join('') || '';
-  }
-
+  const paras = t => String(t).split(/\n{2,}|\r\n\r\n/).map(p => p.trim()).filter(Boolean).map(p => `<p>${esc(p)}</p>`).join('');
   function featureCards(g) {
     const fc = (g.copy && g.copy.features) || [];
-    if (Array.isArray(fc) && fc.length) {
-      return fc.map(f => {
-        const name = f.name || f.title || f.feature || '';
-        const txt = f.description || f.text || f.desc || '';
-        if (!name && !txt) return '';
-        return `<div class="fcard"><h3>${esc(name)}</h3><p>${esc(txt)}</p></div>`;
-      }).join('');
-    }
-    return '';
+    return Array.isArray(fc) ? fc.map(f => {
+      const name = f.name || f.title || f.feature || '', txt = f.description || f.text || f.desc || '';
+      return (name || txt) ? `<div class="fcard"><h3>${esc(name)}</h3><p>${esc(txt)}</p></div>` : '';
+    }).join('') : '';
   }
-
-  let dver = null; // aktiv thumbnail-version i detaljvyn
+  let dver = null;
   function detailHTML(g) {
     const c = g.copy || {};
     const vkeys = Object.keys(g.vers || {});
@@ -219,7 +256,7 @@
       <div class="dbar"><button class="back" onclick="history.back()">← Tillbaka</button>
         <span class="bc">${esc(g.p || '')} / ${esc(g.t)}</span></div>
       <div class="dhero">
-        <div class="art">${hero ? `<img id="dheroimg" src="${esc(hero)}" onerror="this.outerHTML='<div class=noart>${esc(g.t)}</div>'">` : `<div class="noart">${esc(g.t)}</div>`}
+        <div class="art">${hero ? `<img src="${esc(hero)}" onerror="this.outerHTML='<div class=noart>${esc(g.t)}</div>'">` : `<div class="noart">${esc(g.t)}</div>`}
           ${vkeys.length > 1 ? `<div class="vtoggle">${vkeys.map(k => `<button class="vbtn${k === dver ? ' on' : ''}" data-v="${esc(k)}">${esc(k)}</button>`).join('')}</div>` : ''}</div>
         <div class="dtitle">
           <h1>${esc(g.t)}</h1>
@@ -228,42 +265,62 @@
           <div class="dbadges">
             ${g.jp ? '<span class="b">JACKPOT</span>' : ''}
             ${hasBB(g) ? '<span class="b">BONUSKÖP</span>' : ''}
-            ${(g.gt === 'live_casino') ? '<span class="b">LIVE CASINO</span>' : ''}
+            ${isLiveC(g) ? '<span class="b">LIVE CASINO</span>' : ''}
             ${(g.br || []).map(b => `<span class="b ol">${esc(b)}</span>`).join('')}
             <span class="b wc${wc < 60 ? ' thin' : ''}">${wc} ORD COPY</span>
           </div>
         </div>
       </div>
-
       ${longTxt ? `<section class="dsec"><h2>Om spelet</h2><div class="prose">${paras(longTxt)}</div></section>` : ''}
       ${usp ? `<section class="dsec"><h2>Höjdpunkter</h2>${usp}</section>` : ''}
       ${featC ? `<section class="dsec"><h2>Funktioner</h2><div class="fgrid">${featC}</div></section>` : ''}
       ${!featC && featT ? `<section class="dsec"><h2>Funktioner</h2>${featT}</section>` : ''}
-      ${specs.length ? `<section class="dsec"><h2>Specifikationer</h2><table class="specs">${specs.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${fmt(v)}</td></tr>`).join('')}</table></section>` : ''}
+      ${specs.length ? `<section class="dsec"><h2>Specifikationer</h2><table class="specs">${specs.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(String(v))}</td></tr>`).join('')}</table></section>` : ''}
       ${themes.length ? `<section class="dsec"><h2>Teman</h2><div class="ftags">${themes.map(t => `<span>${esc(t)}</span>`).join('')}</div></section>` : ''}
       ${g.desc ? `<section class="dsec"><h2>Vår ad-copy</h2><div class="adcopy"><span class="lbl">Games.description</span>${esc(g.desc)}</div></section>` : ''}
       ${vkeys.length ? vkeys.map(vk => `<section class="dsec"><h2>Thumbnails · ${esc(vk)}</h2><div class="variants">
-        ${['sq', 'ls', 'pt'].filter(k => g.vers[vk][k]).map(k => `<figure><img loading="lazy" src="${esc(g.vers[vk][k])}"><figcaption>${{ sq: '1200×1200', ls: '1200×750', pt: '1000×1350' }[k]}</figcaption></figure>`).join('')}
+        ${['sq', 'ls', 'pt'].filter(k => g.vers[vk][k]).map(k => `<figure><img loading="lazy" src="${esc(g.vers[vk][k])}"><figcaption>${SZL[k]}</figcaption></figure>`).join('')}
       </div></section>`).join('') : ''}
       <div class="dmeta">slug: ${esc(g.id)}${c.src ? ' · copy-källa: ' + esc(c.src) : ''}</div>
     </div>`;
   }
 
+  /* ---------- routing ---------- */
   function route() {
-    const m = location.hash.match(/^#\/game\/(.+)$/);
+    const h = location.hash;
     const d = $('#detail');
-    if (m && GAMES.length) {
-      const g = GAMES.find(x => x.id === decodeURIComponent(m[1]));
+    const gm = h.match(/^#\/game\/(.+)$/);
+    if (gm && GAMES.length) {
+      const g = GAMES.find(x => x.id === decodeURIComponent(gm[1]));
       if (g) {
         d.innerHTML = detailHTML(g); d.hidden = false; d.scrollTop = 0; document.body.style.overflow = 'hidden';
-        d.querySelectorAll('.vbtn').forEach(b => b.addEventListener('click', () => {
-          dver = b.dataset.v; const st = d.scrollTop; d.innerHTML = detailHTML(g); d.scrollTop = st;
-          d.querySelectorAll('.vbtn').forEach(x => x.addEventListener('click', ev => { dver = ev.target.dataset.v; route(); }));
-        }));
+        d.querySelectorAll('.vbtn').forEach(b => b.addEventListener('click', () => { dver = b.dataset.v; route(); }));
         return;
       }
     }
     d.hidden = true; d.innerHTML = ''; document.body.style.overflow = '';
+    const cm = h.match(/^#\/c\/([a-z]+)/);
+    const pm = h.match(/^#\/p\/(.+)$/);
+    if (cm) view = { kind: 'cat', key: cm[1] };
+    else if (pm) view = { kind: 'prov', name: decodeURIComponent(pm[1]) };
+    else view = { kind: 'hem' };
+    if (GAMES.length) applyView();
   }
   addEventListener('hashchange', route);
+
+  function boot() {
+    $('#lock').remove();
+    $('#app').hidden = false;
+    $('#fcount').textContent = GAMES.length;
+    $('#q').addEventListener('input', e => {
+      q = e.target.value;
+      if (q && view.kind === 'hem') { location.hash = '#/c/alla'; return; }
+      if (view.kind !== 'hem') applyView();
+    });
+    $('#burger').addEventListener('click', () => document.body.classList.toggle('side-open'));
+    $('#scrim').addEventListener('click', () => document.body.classList.remove('side-open'));
+    io = new IntersectionObserver(es => es[0].isIntersecting && more());
+    io.observe($('#sentinel'));
+    route();
+  }
 })();
