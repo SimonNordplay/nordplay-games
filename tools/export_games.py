@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exportera games-DB → games.json för Nordplay Games-sajten.
 Inkluderar ALLA thumbnail-versioner per spel (toggle i UI:t)."""
-import sqlite3, json, re
+import os, sqlite3, json, re
 from collections import defaultdict
 
 db = sqlite3.connect('/Users/smalmberg/Nordplay/catalog/nordplay-games.db')

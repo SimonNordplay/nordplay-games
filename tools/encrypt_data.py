@@ -3,7 +3,7 @@
 import gzip, hashlib, secrets, os, sys
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-SP = 'REPO'
+SP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PW = (sys.argv[1] if len(sys.argv) > 1 else 'nordplay2026').encode()
 raw = open(SP+'/games.json', 'rb').read()
 gz = gzip.compress(raw, 9)
