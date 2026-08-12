@@ -40,7 +40,9 @@ KEEP = ['rtp', 'volatility', 'max_win_x', 'max_win', 'hit_rate', 'reels', 'rows'
         'game_format', 'features_list', 'default_bet']
 out = []
 for g in db.execute("select g.*, p.name as pname from games g left join providers p on p.id=g.provider_id where g.status!='removed' order by g.title"):
-    slug = g['slug']; c = copy.get(slug) or {}
+    # Thumbnails i R2 ligger under slug, men game_copy/game_attrs/game_themes m.fl.
+    # pekar på games.id. För 449 spel skiljer de sig — nyckla varje uppslag rätt.
+    slug = g['slug']; gid = g['id']; c = copy.get(gid) or {}
     fcj = usp = None
     try: fcj = json.loads(c.get('features_copy_json') or 'null')
     except Exception: pass
@@ -57,9 +59,9 @@ for g in db.execute("select g.*, p.name as pname from games g left join provider
            'live': bool(g['is_live']), 'jp': bool(g['is_jackpot']), 'rd': g['release_date'],
            'th': best or None,
            'vers': {VLAB.get(k, 'v' + k): v[k] for k in sorted(v, key=lambda x: int(x))} or None,
-           'theme': g['primary_theme'], 'themes': themes.get(slug, []), 'feat': feats.get(slug, []),
-           'br': sorted(set(brands.get(slug, []))), 'desc': g['description'],
-           'attrs': {k: attrs[slug][k] for k in KEEP if k in attrs.get(slug, {})},
+           'theme': g['primary_theme'], 'themes': themes.get(gid, []), 'feat': feats.get(gid, []),
+           'br': sorted(set(brands.get(gid, []))), 'desc': g['description'],
+           'attrs': {k: attrs[gid][k] for k in KEEP if k in attrs.get(gid, {})},
            'copy': {'tag': c.get('tagline'), 'short': c.get('short_pitch'), 'med': c.get('medium_pitch'),
                     'long': c.get('long_description'), 'features': fcj, 'usp': usp, 'src': c.get('source')}}
     rec = {k: v2 for k, v2 in rec.items() if v2 not in (None, '', [], {})}
