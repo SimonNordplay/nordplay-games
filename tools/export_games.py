@@ -30,14 +30,23 @@ for r in db.execute("select gt.game_id, t.name from game_themes gt join themes t
     themes[r[0]].append(r[1])
 for r in db.execute("select ga.game_id, b.name from game_availability ga join brands b on b.id=ga.brand_id where ga.status='active'"):
     brands[r[0]].append(r[1])
-for r in db.execute("select * from game_copy"):
+# Två locales per spel: providerns text (en-EN) och vår genererade annons-/sidtext
+# (sv-SE). Slå ihop dem i stället för att välja en, annars tappar sajten det ena.
+for r in db.execute("select * from game_copy order by locale"):
     c = dict(r)
-    if r['game_id'] not in copy or (c.get('long_description') and not copy[r['game_id']].get('long_description')):
-        copy[r['game_id']] = c
+    cur = copy.setdefault(r['game_id'], {})
+    for k, v in c.items():
+        if v not in (None, '') and not cur.get(k):
+            cur[k] = v
 
 KEEP = ['rtp', 'volatility', 'max_win_x', 'max_win', 'hit_rate', 'reels', 'rows', 'paylines',
-        'ways', 'bonus_buy', 'bonus_buy_max_x', 'min_bet', 'max_bet', 'hit_frequency',
-        'game_format', 'features_list', 'default_bet']
+        'ways', 'bonus_buy', 'bonus_buy_max_x', 'bonus_buy_min_x', 'min_bet', 'max_bet',
+        'hit_frequency', 'game_format', 'features_list', 'default_bet',
+        # härledda mekanikflaggor + numeriska fält (derive_mechanic_flags / derive_numeric_attrs)
+        'free_spins_yn', 'free_spins_count', 'free_spins_retrigger_yn', 'hold_and_win_yn',
+        'cascading_wins_yn', 'sticky_wilds_yn', 'expanding_reels_yn', 'gamble_feature_yn',
+        'jackpot_yn', 'megaways_yn', 'cluster_pays_yn', 'multiplier_yn', 'multipliers_max',
+        'super_bonus_yn']
 out = []
 for g in db.execute("select g.*, p.name as pname from games g left join providers p on p.id=g.provider_id where g.status!='removed' order by g.title"):
     # Thumbnails i R2 ligger under slug, men game_copy/game_attrs/game_themes m.fl.
