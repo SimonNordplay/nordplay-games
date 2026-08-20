@@ -7,7 +7,10 @@ from collections import defaultdict
 db = sqlite3.connect('/Users/smalmberg/Nordplay/catalog/nordplay-games.db')
 db.row_factory = sqlite3.Row
 SZ = {'1200x1200': 'sq', '1200x750': 'ls', '1000x1350': 'pt'}
-VLAB = {'1': 'Logo', '2': 'Hero 1.5', '3': 'Hero', '4': 'Split', '5': 'Boost', '6': 'Roulette', '8': 'Live'}
+# filprefix -> version: 1=v1.0 2=v1.5 3=v1.5.2 4=v2.0 5=v3.0 6=v6.0 7=v5.0 8=v7.0 9=v9.0
+# (kanonisk karta: catalog-thumbnail/_tools/mirror_ready_to_drive.py _PFX2VER)
+VLAB = {'1': 'Logo', '2': 'Hero 1.5', '3': 'Hero', '4': 'Split', '5': 'Boost',
+        '6': 'Roulette', '7': 'Ready-made', '8': 'Live', '9': 'v9.0'}
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'games.json')
 
 vers = defaultdict(lambda: defaultdict(dict))
